@@ -1,0 +1,52 @@
+{
+  "validUsers": [
+    {
+      "username": "test.user@example.com",
+      "password": "Test@123",
+      "name": "Test User",
+      "role": "user"
+    },
+    {
+      "username": "admin@example.com",
+      "password": "Admin@123",
+      "name": "Admin User",
+      "role": "admin"
+    }
+  ],
+  "invalidUsers": [
+    {
+      "username": "invalid@example.com",
+      "password": "wrongpassword",
+      "expectedError": "Invalid credentials"
+    },
+    {
+      "username": "test@example.com",
+      "password": "",
+      "expectedError": "Password is required"
+    },
+    {
+      "username": "",
+      "password": "Test@123",
+      "expectedError": "Username is required"
+    },
+    {
+      "username": "invalidformat",
+      "password": "Test@123",
+      "expectedError": "Invalid email format"
+    }
+  ],
+  "testEnvironments": {
+    "dev": {
+      "baseUrl": "https://dev.example.com",
+      "apiUrl": "https://api-dev.example.com"
+    },
+    "staging": {
+      "baseUrl": "https://staging.example.com",
+      "apiUrl": "https://api-staging.example.com"
+    },
+    "production": {
+      "baseUrl": "https://example.com",
+      "apiUrl": "https://api.example.com"
+    }
+  }
+}

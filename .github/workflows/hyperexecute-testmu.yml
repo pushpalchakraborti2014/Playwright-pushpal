@@ -1,0 +1,264 @@
+name: HyperExecute TestMu AI Automation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'tests/testmu-*.spec.js'
+      - 'pageObjects/*TestMu*.js'
+      - 'hyperexecute.yml'
+  
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tests/testmu-*.spec.js'
+      - 'pageObjects/*TestMu*.js'
+      - 'hyperexecute.yml'
+  
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - simple-form
+        - drag-drop
+        - input-form
+      
+      browser:
+        description: 'Browser for testing'
+        required: true
+        default: 'chrome,firefox'
+        type: choice
+        options:
+        - chrome
+        - firefox
+        - chrome,firefox
+      
+      os:
+        description: 'Operating System'
+        required: true
+        default: 'win,linux'
+        type: choice
+        options:
+        - win
+        - linux
+        - win,linux
+
+env:
+  # LambdaTest HyperExecute Configuration
+  LT_USERNAME: ${{ secrets.LT_USERNAME }}
+  LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+  
+  # Test Configuration
+  TEST_ENV: github_actions
+  NODE_VERSION: 18
+  
+  # Artifacts Configuration
+  ARTIFACTS_ENABLED: true
+  GENERATE_REPORTS: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-os: ${{ steps.setup-matrix.outputs.os }}
+      matrix-browser: ${{ steps.setup-matrix.outputs.browser }}
+      test-files: ${{ steps.setup-matrix.outputs.test-files }}
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Matrix Configuration
+      id: setup-matrix
+      run: |
+        # Setup OS matrix
+        if [ "${{ github.event.inputs.os }}" = "" ]; then
+          OS_MATRIX='["win", "linux"]'
+        else
+          OS_MATRIX='["${{ github.event.inputs.os }}"]'
+        fi
+        
+        # Setup Browser matrix
+        if [ "${{ github.event.inputs.browser }}" = "" ]; then
+          BROWSER_MATRIX='["chrome", "firefox"]'
+        else
+          IFS=',' read -ra BROWSERS <<< "${{ github.event.inputs.browser }}"
+          BROWSER_MATRIX=$(printf '%s\n' "${BROWSERS[@]}" | jq -R . | jq -s .)
+        fi
+        
+        # Setup test files based on suite selection
+        if [ "${{ github.event.inputs.test_suite }}" = "simple-form" ]; then
+          TEST_FILES="tests/testmu-simple-form.spec.js"
+        elif [ "${{ github.event.inputs.test_suite }}" = "drag-drop" ]; then
+          TEST_FILES="tests/testmu-drag-drop-sliders.spec.js"
+        elif [ "${{ github.event.inputs.test_suite }}" = "input-form" ]; then
+          TEST_FILES="tests/testmu-input-form.spec.js"
+        else
+          TEST_FILES="tests/testmu-*.spec.js"
+        fi
+        
+        echo "os=$OS_MATRIX" >> $GITHUB_OUTPUT
+        echo "browser=$BROWSER_MATRIX" >> $GITHUB_OUTPUT
+        echo "test-files=$TEST_FILES" >> $GITHUB_OUTPUT
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+    
+    - name: Install Dependencies
+      run: npm ci
+    
+    - name: Validate Test Files
+      run: |
+        echo "Validating test files..."
+        npm run lint || true
+        
+        # Check if test files exist
+        for file in tests/testmu-*.spec.js; do
+          if [ -f "$file" ]; then
+            echo "✓ Found test file: $file"
+          else
+            echo "✗ Missing test file: $file"
+          fi
+        done
+    
+    - name: Validate HyperExecute Configuration
+      run: |
+        echo "Validating hyperexecute.yml..."
+        if [ -f "hyperexecute.yml" ]; then
+          echo "✓ HyperExecute configuration found"
+          # Basic YAML validation
+          python3 -c "import yaml; yaml.safe_load(open('hyperexecute.yml'))" || exit 1
+        else
+          echo "✗ HyperExecute configuration not found"
+          exit 1
+        fi
+
+  hyperexecute:
+    runs-on: ubuntu-latest
+    needs: [setup, validate]
+    if: always() && needs.validate.result == 'success'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.setup.outputs.matrix-os) }}
+        browser: ${{ fromJson(needs.setup.outputs.matrix-browser) }}
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: Setup HyperExecute CLI
+      run: |
+        echo "Setting up HyperExecute CLI..."
+        wget -q https://downloads.lambdatest.com/hyperexecute/linux/hyperexecute
+        chmod +x hyperexecute
+        ./hyperexecute --version
+    
+    - name: Validate Secrets
+      run: |
+        if [ -z "${{ secrets.LT_USERNAME }}" ] || [ -z "${{ secrets.LT_ACCESS_KEY }}" ]; then
+          echo "Error: LambdaTest credentials not found in secrets"
+          echo "Please add LT_USERNAME and LT_ACCESS_KEY to repository secrets"
+          exit 1
+        fi
+        echo "✓ LambdaTest credentials found"
+    
+    - name: Create Dynamic HyperExecute Config
+      run: |
+        # Create a matrix-specific config
+        cp hyperexecute.yml hyperexecute-${{ matrix.os }}-${{ matrix.browser }}.yml
+        
+        # Update matrix values in the config
+        sed -i 's/os: \[win, linux\]/os: [${{ matrix.os }}]/' hyperexecute-${{ matrix.os }}-${{ matrix.browser }}.yml
+        sed -i 's/browser: \[chrome, firefox\]/browser: [${{ matrix.browser }}]/' hyperexecute-${{ matrix.os }}-${{ matrix.browser }}.yml
+        
+        echo "Configuration for OS: ${{ matrix.os }}, Browser: ${{ matrix.browser }}"
+    
+    - name: Execute Tests on HyperExecute
+      env:
+        LT_USERNAME: ${{ secrets.LT_USERNAME }}
+        LT_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+      run: |
+        echo "Triggering HyperExecute for OS: ${{ matrix.os }}, Browser: ${{ matrix.browser }}"
+        
+        # Set additional environment variables
+        export GITHUB_RUN_ID=${{ github.run_id }}
+        export GITHUB_ACTOR=${{ github.actor }}
+        export GITHUB_EVENT_NAME=${{ github.event_name }}
+        export MATRIX_OS=${{ matrix.os }}
+        export MATRIX_BROWSER=${{ matrix.browser }}
+        
+        # Execute HyperExecute
+        ./hyperexecute --config hyperexecute-${{ matrix.os }}-${{ matrix.browser }}.yml \
+          --verbose \
+          --vars="GITHUB_RUN_ID=$GITHUB_RUN_ID" \
+          --vars="GITHUB_ACTOR=$GITHUB_ACTOR" \
+          --vars="GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
+    
+    - name: Upload HyperExecute Logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: hyperexecute-logs-${{ matrix.os }}-${{ matrix.browser }}
+        path: |
+          hyperexecute*.log
+          .hyperexecute/
+        retention-days: 30
+
+  post-execution:
+    runs-on: ubuntu-latest
+    needs: [hyperexecute]
+    if: always()
+    
+    steps:
+    - name: Test Execution Summary
+      run: |
+        echo "## 🚀 HyperExecute Test Execution Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Execution Details:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Actor**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Run ID**: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.hyperexecute.result }}" = "success" ]; then
+          echo "✅ **Status**: All tests executed successfully" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status**: Some tests failed or were cancelled" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Test Artifacts:" >> $GITHUB_STEP_SUMMARY
+        echo "- Check HyperExecute Dashboard for detailed reports" >> $GITHUB_STEP_SUMMARY
+        echo "- Screenshots, videos, and traces are available in artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Download consolidated artifacts from HyperExecute dashboard" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Notify on Failure
+      if: needs.hyperexecute.result == 'failure'
+      run: |
+        echo "Test execution failed. Check the HyperExecute dashboard for details."
+        # Add notification logic here (Slack, Teams, etc.)
+
+# Security Configuration
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write

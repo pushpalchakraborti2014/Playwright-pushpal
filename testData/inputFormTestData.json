@@ -1,0 +1,19 @@
+{
+    "inputForm": {
+        "validFormData": {
+            "firstName": "John",
+            "lastName": "Doe",
+            "email": "john.doe@testmu.ai",
+            "phone": "1234567890",
+            "address": "123 Test Street",
+            "city": "Test City",
+            "state": "California",
+            "zipCode": "12345",
+            "website": "https://www.testmu.ai",
+            "comment": "This is a test automation comment"
+        },
+        "country": "United States",
+        "expectedErrorMessage": "Please fill in this field.",
+        "expectedSuccessMessage": "Thanks for contacting us, we will get back to you shortly."
+    }
+}

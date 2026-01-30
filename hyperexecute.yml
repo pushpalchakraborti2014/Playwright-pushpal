@@ -1,0 +1,200 @@
+# HyperExecute YAML Configuration for TestMu AI Automation Tests
+# This file demonstrates all required HyperExecute features:
+# - Artifacts Management
+# - Secret Management  
+# - Environment Variables
+# - Pre Steps and Dependency Caching
+# - Post Steps
+# - Parallel execution on multiple browser/OS combinations
+
+version: 0.1
+globalTimeout: 180
+testSuiteTimeout: 150
+testSuiteStep: 90
+
+# Project Details
+runson: win
+autosplit: true
+
+# Concurrency Configuration for Parallel Execution
+concurrency: 2
+
+# Environment Variables
+env:
+  # Base configuration
+  NODE_VERSION: 18
+  PLAYWRIGHT_BROWSERS_PATH: 0
+  
+  # TestMu AI specific configuration
+  TEST_ENV: hyperexecute
+  BASE_URL: https://www.testmu.ai/selenium-playground/
+  BROWSER_TIMEOUT: 60000
+  TEST_TIMEOUT: 120000
+  
+  # Artifacts configuration
+  ARTIFACTS_ENABLED: true
+  VIDEO_RECORDING: true
+  SCREENSHOTS: true
+  TRACES: true
+  
+  # Report configuration
+  GENERATE_REPORTS: true
+  ALLURE_RESULTS_DIR: allure-results
+  HTML_REPORT_DIR: playwright-report
+
+# Secret Management - These will be injected from HyperExecute Dashboard
+vars:
+  LT_USERNAME: ${{ .secrets.LT_USERNAME }}
+  LT_ACCESS_KEY: ${{ .secrets.LT_ACCESS_KEY }}
+  TEST_API_KEY: ${{ .secrets.TEST_API_KEY }}
+  NOTIFICATION_WEBHOOK: ${{ .secrets.NOTIFICATION_WEBHOOK }}
+
+# Matrix Configuration for Different Browser/OS Combinations
+matrix:
+  os: [win, linux]
+  browser: [chrome, firefox]
+  
+# Pre Steps - Dependency Caching and Setup
+pre:
+  # Install Node.js dependencies with caching
+  - name: Cache Node Modules
+    command: |
+      echo "Setting up dependency caching..."
+      npm ci --cache .npm --prefer-offline
+    
+  # Install Playwright browsers with caching
+  - name: Setup Playwright Browsers
+    command: |
+      echo "Installing Playwright browsers..."
+      npx playwright install
+      npx playwright install-deps
+    
+  # Create necessary directories
+  - name: Setup Directories
+    command: |
+      mkdir -p test-results
+      mkdir -p allure-results  
+      mkdir -p playwright-report
+      mkdir -p screenshots
+      mkdir -p videos
+      mkdir -p traces
+    
+  # Verify environment setup
+  - name: Environment Verification
+    command: |
+      echo "Node Version: $(node --version)"
+      echo "NPM Version: $(npm --version)"
+      echo "Playwright Version: $(npx playwright --version)"
+      echo "Environment: $TEST_ENV"
+      echo "Base URL: $BASE_URL"
+
+# Cache Configuration for Dependency Caching
+cacheKey: |
+  checksum('package-lock.json')
+
+cacheDirectories:
+  - node_modules
+  - .npm
+  - ~/.cache/ms-playwright
+
+# Test Discovery and Execution
+testDiscovery:
+  type: raw
+  mode: static
+  command: find tests -name "*testmu*.spec.js" -type f
+
+# Test Execution Command
+testRunnerCommand: |
+  npx playwright test $test --project=$browser-$os --workers=1 --reporter=html,allure-playwright,json --output-dir=test-results
+
+# Post Steps - Cleanup and Notifications
+post:
+  # Generate consolidated test reports
+  - name: Generate Allure Report
+    command: |
+      echo "Generating Allure report..."
+      npx allure generate allure-results --clean -o allure-report || true
+    
+  # Generate HTML report summary
+  - name: Generate HTML Report
+    command: |
+      echo "Generating HTML report..."
+      npx playwright show-report --host 0.0.0.0 || true
+    
+  # Create test execution summary
+  - name: Test Summary
+    command: |
+      echo "=== TEST EXECUTION SUMMARY ==="
+      echo "OS: $matrix_os"
+      echo "Browser: $matrix_browser" 
+      echo "Environment: $TEST_ENV"
+      echo "Timestamp: $(date)"
+      ls -la test-results/ || true
+      echo "================================"
+    
+  # Clean up temporary files (optional)
+  - name: Cleanup
+    command: |
+      echo "Cleaning up temporary files..."
+      rm -rf .npm || true
+    
+  # Send notification (if webhook is configured)
+  - name: Send Notification
+    command: |
+      if [ ! -z "$NOTIFICATION_WEBHOOK" ]; then
+        echo "Sending test completion notification..."
+        curl -X POST "$NOTIFICATION_WEBHOOK" \
+          -H "Content-Type: application/json" \
+          -d '{"message":"TestMu AI tests completed", "os":"'$matrix_os'", "browser":"'$matrix_browser'"}' || true
+      fi
+
+# Artifacts Management Configuration
+mergeArtifacts: true
+
+uploadArtefacts:
+  - name: test-results
+    path:
+      - test-results/**
+  
+  - name: allure-results
+    path:
+      - allure-results/**
+      - allure-report/**
+  
+  - name: playwright-reports
+    path:
+      - playwright-report/**
+  
+  - name: screenshots
+    path:
+      - screenshots/**
+      - test-results/**/*.png
+  
+  - name: videos
+    path:
+      - videos/**
+      - test-results/**/*.webm
+  
+  - name: traces
+    path:
+      - traces/**
+      - test-results/**/*.zip
+  
+  - name: logs
+    path:
+      - "*.log"
+      - logs/**
+
+# Report Portal Configuration (Optional)
+report: true
+partialReports:
+  frameworkName: playwright
+  location: test-results
+  type: json
+
+# Retry Configuration
+retryOnFailure: true
+maxRetries: 2
+
+# Job Labels for Organization
+jobLabel: ['testmu-ai', 'playwright', 'e2e-tests', 'hyperexecute']

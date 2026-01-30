@@ -1,0 +1,64 @@
+---
+version: 0.1
+globalTimeout: 150
+testSuiteTimeout: 150
+testSuiteStep: 150
+
+runson: linux
+
+# Concurrency - run 2 parallel tests
+concurrency: 2
+
+# Pre-requisite steps before test execution
+pre:
+  - npm install
+  - npx playwright install chromium
+
+# Post steps after test execution
+post:
+  - cat hyperexecute-logs/*.log
+
+# Environment variables
+env:
+  TEST_ENV: production
+  BASE_URL: https://www.testmuai.com/selenium-playground/
+
+# Test discovery and execution - will run the test twice in parallel
+testDiscovery:
+  type: raw
+  mode: static
+  command: echo "tests/test-scenario-1-direct.spec.js" && echo "tests/test-scenario-1-direct.spec.js"
+
+testRunnerCommand: npx playwright test $test --project=chromium
+
+# Browser and OS matrix for parallel execution
+matrix:
+  browser: ["chrome"]
+  os: ["linux"]
+
+# Artifacts to collect
+artifacts:
+  - name: playwright-html-report
+    path:
+      - playwright-report/**
+  - name: test-results
+    path:
+      - test-results/**
+  - name: screenshots
+    path:
+      - screenshots/**
+
+# Caching to speed up execution
+cacheKey: '{{ checksum "package-lock.json" }}'
+cacheDirectories:
+  - node_modules
+
+# Report configuration
+report: true
+partialReports:
+  location: test-results
+  type: html
+  frameworkName: playwright
+
+# Job labels
+jobLabel: ['TestMu-Scenario-1', 'Chrome-Linux', 'Parallel']
